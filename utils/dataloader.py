@@ -18,7 +18,7 @@ class EpisodeDataset(Dataset):
     
     def __init__(self, split_class_json, class2images_mapping_json, 
                  img_dir, mask_dir, 
-                 n_way=5, k_shot=5, q_query=5, phase="train", max_episodes=None, 
+                 n_way=5, k_shot=5, q_query=5, episodes=None, phase="train", 
                  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
         
         self.img_dir = Path(img_dir)
@@ -27,7 +27,7 @@ class EpisodeDataset(Dataset):
         self.k_shot = k_shot
         self.q_query = q_query
         self.phase = phase
-        self.max_episodes = max_episodes or (100000 if phase=="train" else 1000)
+        self.episodes = episodes or (1000 if phase=="train" else 100)
 
         with open(split_class_json, 'r') as f:
             self.split = json.load(f)
@@ -51,7 +51,7 @@ class EpisodeDataset(Dataset):
             ])
 
     def __len__(self):
-        return self.max_episodes
+        return self.episodes
 
     def __getitem__(self, idx):
         # 随机取 n_way 个类别
@@ -75,18 +75,18 @@ class EpisodeDataset(Dataset):
                 support_img = self.image_transform(img)
                 support_mask = self.mask_transform(mask)
                 
-                support_set.append((support_img, support_mask))
+                support_set.append((support_img, support_mask, cls))  # 显式附带类别ID，减少模型动态映射计算
 
-            for img_id in sampled_imgs[:self.q_query]:
+            for img_id in sampled_imgs[self.k_shot:]:
                 img_path = self.img_dir / f"{img_id}.jpg"
                 mask_path = self.mask_dir / f"{img_id}.png"
 
                 image = Image.open(img_path).convert("RGB")
-                mask = Image.open(mask_path)
+                mask = Image.open(mask_path)  # query不进行二值化，保留原生类别ID
 
                 query_img = self.image_transform(image)
                 query_mask = self.mask_transform(mask)
                 
                 query_set.append((query_img, query_mask))
 
-        return support_set, query_set
+        return support_set, query_set, selected_classes

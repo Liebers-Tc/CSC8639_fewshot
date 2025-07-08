@@ -2,11 +2,12 @@ import os
 import torch
 from torch.amp import autocast, GradScaler
 from utils.log import Logger
+from utils.mask_mapping import remap_querymask
 
 
 class Trainer:
     def __init__(self, model, train_loader, val_loader, epochs, 
-                 loss_fn, metric_fn, main_metric, 
+                 loss_fn, metric_fn, ignore_index, main_metric, 
                  optimizer, scheduler, 
                  early_stopping_patience, 
                  device, use_amp, 
@@ -21,6 +22,7 @@ class Trainer:
 
         self.loss_fn = loss_fn
         self.metric_fn = metric_fn
+        self.ignore_index = ignore_index
         self.main_metric = main_metric
         self.greater_is_better = main_metric != 'loss'
 
@@ -50,6 +52,7 @@ class Trainer:
         # self.train_metrics = {}
         self.val_metrics = {}
 
+
     def run_one_epoch(self, train=True):
         dataloader = self.train_loader if train else self.val_loader
         self.model.train() if train else self.model.eval()
@@ -58,17 +61,17 @@ class Trainer:
         total_metric = {}
 
         with torch.set_grad_enabled(train):
-            for i, (support_set, query_set) in enumerate(dataloader):
+            for i, (support_set, query_set, selected_classes) in enumerate(dataloader):
                 self.optimizer.zero_grad()
                 
-                support_set = [(img.to(self.device), mask.to(self.device)) for img, mask in support_set]
-                query_imgs = torch.stack([img for img, _ in query_set]).to(self.device)
+                support_set = [(img.to(self.device), mask.to(self.device), cls) for img, mask, cls in support_set]
                 query_masks = torch.stack([mask for _, mask in query_set]).to(self.device)
 
                 with autocast(device_type=self.device, enabled=self.use_amp):
-                    outputs = self.model(support_set, query_set)  # forward(support, query)
-                    loss = self.loss_fn(outputs, query_masks)
-                    metrics = self.metric_fn(outputs, query_masks) if not train else {}
+                    outputs = self.model(support_set, query_set, selected_classes)  # model.forward(support_set, query_set, selected_classes)
+                    remapped_querymask = remap_querymask(query_masks, selected_classes, ignore_index=self.ignore_index)
+                    loss = self.loss_fn(outputs, remapped_querymask)
+                    metrics = self.metric_fn(outputs, remapped_querymask, selected_classes, ignore_index=self.ignore_index) if not train else {}
 
                 if train:
                     self.scaler.scale(loss).backward()
@@ -102,7 +105,7 @@ class Trainer:
 
         # 0. 权重路径不存在
         if self.weight_path and not os.path.exists(self.weight_path):
-            raise FileNotFoundError(f"Checkpoint or Pre-trained weight not found at: {self.resume_path}")
+            raise FileNotFoundError(f"Checkpoint or Pre-trained weight not found at: {self.weight_path}")
         
         # 1. 断点续训，恢复 epoch 与优化器
         elif self.weight_path and self.is_resume:

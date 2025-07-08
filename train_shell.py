@@ -2,7 +2,6 @@ import argparse
 import torch
 from torch.utils.data import DataLoader
 from pathlib import Path
-from model.unet_model import UNet
 from model.prototype_model import PrototypeNet
 from utils.dataloader import EpisodeDataset
 from utils.loss import get_loss
@@ -14,14 +13,17 @@ from trainer import Trainer
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Segmentation Training")
-    parser.add_argument('--dataset', type=str, required=True)
+    parser = argparse.ArgumentParser(description="FewShot Segmentation Training")
+    # parser.add_argument('--dataset', type=str, required=True)
+    parser.add_argument('--n_way', type=int, default='5')
+    parser.add_argument('--k_shot', type=int, default='5')
+    parser.add_argument('--q_query', type=int, default='5')
+    parser.add_argument('--episodes', type=int, default=1000)
+
     parser.add_argument('--model_name', type=str, default='proto')
-    parser.add_argument('--in_channels', type=int, default=3)
-    parser.add_argument('--num_classes', type=int, default=104)
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--num_workers', type=int, default=8)
-    parser.add_argument('--epochs', type=int)
+    parser.add_argument('--epochs', type=int, required=True)
 
     parser.add_argument('--optimizer', type=str, default='adamw')
     parser.add_argument('--scheduler', type=str, default='step')
@@ -29,6 +31,7 @@ def parse_args():
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--loss', type=str, default='ce')
     parser.add_argument('--metric', nargs='+', default=['miou', 'dice', 'acc'])
+    parser.add_argument('--ignore_index', type=int, default=255)
     parser.add_argument('--main_metric', type=str, default='loss')
     parser.add_argument('--early_stopping_patience', type=int, default=None)
     
@@ -57,34 +60,33 @@ def main():
     save_dir = args.save_dir or get_save_path(root_dir='result')
 
     # Dataloader
-    # mean, std = compute_mean_std(Path(args.dataset) / 'train' / 'images')
+    # mean, std = compute_mean_std(Path("./data/fs_dataset_256/rawdata/image"))
     train_loader = DataLoader(
         EpisodeDataset(split_class_json="./data/fs_dataset_256/class_split.json", 
                        class2images_mapping_json="./data/fs_dataset_256/class2images_mapping.json", 
                        img_dir="./data/fs_dataset_256/rawdata/image", 
                        mask_dir="./data/fs_dataset_256/rawdata/mask", 
-                       n_way=5, k_shot=5, q_query=5, phase="train"), 
+                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.episodes, phase="train"), 
         batch_size=1, shuffle=True, num_workers=args.num_workers)
+    
     val_loader = DataLoader(
         EpisodeDataset(split_class_json="./data/fs_dataset_256/class_split.json", 
                        class2images_mapping_json="./data/fs_dataset_256/class2images_mapping.json", 
                        img_dir="./data/fs_dataset_256/rawdata/image", 
                        mask_dir="./data/fs_dataset_256/rawdata/mask", 
-                       n_way=5, k_shot=5, q_query=5, phase="val"), 
+                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.episodes, phase="val"), 
         batch_size=1, shuffle=False, num_workers=args.num_workers)
 
     # Model
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    if args.model_name == 'unet':
-        model = UNet(in_channels=args.in_channels, num_classes=args.num_classes).to(device)
-    elif args.model_name == 'proto':
-        model = PrototypeNet(in_channels=args.in_channels, num_classes=args.num_classes).to(device)
+    if args.model_name == 'proto':
+        model = PrototypeNet().to(device)
     else:
         raise ValueError(f"Unsupported model: {args.model_name}")
 
     # Loss & Metrics
-    loss_fn = get_loss(name=args.loss)
-    metric_fn = get_metric(names=args.metric, num_classes=args.num_classes, per_image=False) # 可选返回每张图的指标
+    loss_fn = get_loss(name=args.loss, ignore_index=args.ignore_index)
+    metric_fn = get_metric(names=args.metric, per_image=False) # 可选返回每张图的指标
 
     # Optimizer & Scheduler
     optimizer = get_optimizer(model=model, name=args.optimizer, lr=args.learning_rate, weight_decay=args.weight_decay, use_param_groups=False) # 可选参数分组
@@ -103,6 +105,7 @@ def main():
                       epochs=args.epochs,
                       loss_fn=loss_fn,
                       metric_fn=metric_fn,
+                      ignore_index=args.ignore_index,
                       main_metric=main_metric,
                       optimizer=optimizer,
                       scheduler=scheduler,

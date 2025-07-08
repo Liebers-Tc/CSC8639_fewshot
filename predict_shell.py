@@ -3,23 +3,27 @@ import argparse
 import torch
 from torch.utils.data import DataLoader
 from pathlib import Path
-from model.unet_model import UNet
 from model.prototype_model import PrototypeNet
 from utils.dataloader import EpisodeDataset
 from utils.visualization import Visualizer
 from utils.metrics import get_metric
 from utils.savepath import find_latest_path
 from utils.compute import compute_mean_std
+from fewshot.utils.mask_mapping import reverse_remap
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Segmentation Prediction")
-    parser.add_argument('--dataset', type=str, required=True)
+    parser = argparse.ArgumentParser(description="FewShot Segmentation Prediction")
+    # parser.add_argument('--dataset', type=str, required=True)
+    parser.add_argument('--n_way', type=int, default='5')
+    parser.add_argument('--k_shot', type=int, default='5')
+    parser.add_argument('--q_query', type=int, default='5')
+    parser.add_argument('--episodes_per_epoch', type=int, default=1000)
+
     parser.add_argument('--model_name', type=str, required=True)
-    parser.add_argument('--in_channels', type=int, default=3)
-    parser.add_argument('--num_classes', type=int, default=104)
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--num_workers', type=int, default=8)
+    parser.add_argument('--metric', nargs='+', default=['miou', 'dice', 'acc'])
 
     parser.add_argument('--weight_path', type=str, required=True)
     parser.add_argument('--use_amp', action='store_true')
@@ -42,21 +46,19 @@ def main():
         wandb_logger = None
 
     # Dataloader
-    mean, std = compute_mean_std(Path(args.dataset) / 'train' / 'images')
+    # mean, std = compute_mean_std(Path("./data/fs_dataset_256/rawdata/image"))
     test_loader = DataLoader(
         EpisodeDataset(split_class_json="./data/fs_dataset_256/class_split.json", 
                        class2images_mapping_json="./data/fs_dataset_256/class2images_mapping.json", 
                        img_dir="./data/fs_dataset_256/rawdata/image", 
                        mask_dir="./data/fs_dataset_256/rawdata/mask", 
-                       n_way=5, k_shot=5, q_query=5, phase="val"), 
+                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.episodes, phase="pred"), 
         batch_size=1, shuffle=False, num_workers=args.num_workers)
     
     # Model
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    if args.model_name == 'unet':
-        model = UNet(in_channels=args.in_channels, num_classes=args.num_classes).to(device)
-    elif args.model_name == 'proto':
-        model = PrototypeNet(in_channels=args.in_channels, num_classes=args.num_classes).to(device)
+    if args.model_name == 'proto':
+        model = PrototypeNet().to(device)
     else:
         raise ValueError(f"Unsupported model: {args.model_name}")
 
@@ -69,17 +71,17 @@ def main():
     os.makedirs(save_dir, exist_ok=True)
 
     # Visualizer
-    visualizer = Visualizer(save_dir=save_dir, mean=mean, std=std,
+    visualizer = Visualizer(save_dir=save_dir,
                             max_save_samples=None, max_show_groups=3, wandb_logger=wandb_logger,
                             upload_pred=False, upload_overlay=False, upload_group=True)
     
     # Metric
-    metric_fn = get_metric(names=['miou', 'dice', 'acc'], num_classes=args.num_classes, per_image=False)
+    metric_fn = get_metric(names=args.metric, per_image=False)
     total_metrics = {}
 
     # Predict
     with torch.no_grad():
-        for step, (support_set, query_set) in enumerate(test_loader):
+        for step, (support_set, query_set, selected_classes) in enumerate(test_loader):
             support_set = [(img.to(device), mask.to(device)) for img, mask in support_set]
             query_imgs = torch.stack([img for img, _ in query_set]).to(device)
             query_masks = torch.stack([mask for _, mask in query_set]).to(device)
@@ -88,6 +90,7 @@ def main():
                 outputs = model(support_set, query_set)
 
             preds = torch.argmax(outputs, dim=1)
+            preds = reverse_remap(preds, selected_classes)
             start_index = step * args.batch_size
             visualizer.save_group(query_imgs, query_masks, preds, start_index=start_index)
 

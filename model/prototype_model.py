@@ -1,78 +1,73 @@
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import resnet18
+from collections import defaultdict
 
 
 class PrototypeNet(nn.Module):
-    def __init__(self, in_channels=3, num_classes=104, backbone='resnet18', pretrained=True):
+    def __init__(self, in_channels=3, backbone="resnet18", pretrained=True):
         super().__init__()
-        self.num_classes = num_classes
 
-        # Use ResNet18 as encoder
+        # 加载预训练模型作为 encoder
         resnet = resnet18(pretrained=pretrained)
         self.encoder = nn.Sequential(
             resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool,
             resnet.layer1, resnet.layer2, resnet.layer3
         )
-        self.out_channels = 256  # resnet layer3 output
+        self.out_channels = 256  # encoder输出通道
 
     def extract_features(self, images):
-        """Input: Tensor [B, 3, H, W] -> Output: [B, C, h, w]"""
-        return self.encoder(images)
-
-    def compute_prototype(self, support_feats, support_masks):
+        return self.encoder(images)  # [B, 3, H, W] -> [B, C, h, w]
+    
+    def forward(self, support_set, query_set, selected_classes):
         """
-        support_feats: [N*K, C, h, w]
-        support_masks: [N*K, h, w] with 0/1 mask
-        Return: prototype [N, C]
+        support_set: List[image, mask]，mask 为二值化后类别ID
+        query_set: List[image, mask]，mask 为原始类别ID
+        selected_classes: List[int]，当前 episode 中 support set 的类别ID
         """
-        n_shots = len(support_feats)
-        c = support_feats.shape[1]
-        h, w = support_feats.shape[2:]
+        device = self.encoder[0].weight.device
+        n_way = len(selected_classes)
 
-        # Flatten support features
-        feats = support_feats.view(n_shots, c, -1)                # [NK, C, h*w]
-        masks = support_masks.view(n_shots, -1).float()           # [NK, h*w]
+        # initial & extract features
+        support_imgs = torch.stack([img for img, _, _ in support_set], dim=0).to(device)  # [S, 3, H, W]
+        support_feats = self.extract_features(support_imgs)  # [S, C, h, w]
 
-        # Apply mask to feature map
-        masked_feats = feats * masks.unsqueeze(1)                # [NK, C, h*w]
-        prototype = masked_feats.sum(dim=2) / (masks.sum(dim=1, keepdim=True) + 1e-5)  # [NK, C]
-        return prototype.mean(dim=0, keepdim=True)                # [1, C]
+        # build prototype
+        proto_dict = {cls_id: [] for cls_id in selected_classes}
+        for i, (img, binary_mask, cls_id) in enumerate(support_set):
+            feat = support_feats[i]  # [C, h, w]
+            mask = binary_mask.float().unsqueeze(0).unsqueeze(0).to(device)  # [1, 1, H, W]
+            mask = F.interpolate(mask, size=feat.shape[1:], mode='nearest').squeeze()  # [h, w]
 
-    def forward(self, support_set, query_set):
-        """
-        support_set: list of (image, mask) tensors
-        query_set: list of (image, mask) tensors
-        Returns:
-            query_pred: Tensor [Q, num_classes, h, w]
-        """
-        support_imgs = torch.stack([img for img, _ in support_set], dim=0)   # [N*K, 3, H, W]
-        support_masks = torch.stack([mask for _, mask in support_set], dim=0)  # [N*K, H, W]
-        query_imgs = torch.stack([img for img, _ in query_set], dim=0)       # [Q, 3, H, W]
+            feat_flat = feat.view(self.out_channels, -1)  # [C, h*w]
+            mask_flat = mask.view(-1)  # [h*w]
+            if mask_flat.sum() == 0:
+                continue
 
-        support_feats = self.extract_features(support_imgs)  # [NK, C, h, w]
-        query_feats = self.extract_features(query_imgs)      # [Q, C, h, w]
+            selected_feat = feat_flat[:, mask_flat > 0]  # [C, N]
+            proto = selected_feat.mean(dim=1)            # [C]
+            proto_dict[cls_id].append(proto)
 
-        # compute prototype
-        proto = self.compute_prototype(support_feats, support_masks)   # [1, C]
-        proto = F.normalize(proto, dim=1)                              # cosine normalize
+        # initial / update prototype for each class (mean & normalize)
+        prototypes = []
+        for cls_id in selected_classes:
+            vecs = proto_dict[cls_id]
+            if len(vecs) == 0:
+                prototypes.append(torch.zeros(1, self.out_channels, device=device))
+            else:
+                proto = torch.stack(vecs).mean(dim=0, keepdim=True)
+                proto = F.normalize(proto, dim=1)
+                prototypes.append(proto)
 
-        # query
-        q = query_feats.shape[0]
-        query_feats = F.normalize(query_feats, dim=1)
-        query_feats_flat = query_feats.view(q, self.out_channels, -1)  # [Q, C, h*w]
+        prototypes = torch.cat(prototypes, dim=0)  # [n_way, C]
 
-        # cosine similarity
-        sim = torch.einsum('qcm,pc->qpm', query_feats_flat, proto)     # [Q, 1, h*w]
-        sim = sim.view(q, 1, query_feats.shape[2], query_feats.shape[3])  # [Q, 1, h, w]
+        # query inference
+        query_imgs = torch.stack([img for img, _ in query_set], dim=0).to(device)  # [B, 3, H, W]
+        query_feats = self.extract_features(query_imgs)  # [B, C, h, w]
+        query_feats = F.normalize(query_feats, dim=1)    # 归一化后用于余弦相似度
 
-        # expand to multi-class prediction if needed
-        if self.num_classes > 1:
-            out = torch.zeros((q, self.num_classes, sim.shape[2], sim.shape[3]), device=sim.device)
-            out[:, 1] = sim[:, 0]  # class 1 foreground
-            out[:, 0] = -sim[:, 0]  # class 0 background
-            return out
-        else:
-            return sim  # [Q, 1, h, w]
+        # similarity (cos)
+        sims = torch.einsum('bchw,nc->bnhw', query_feats, prototypes)  # [B, N_way, h, w]
+
+        return sims  # logits, 每个像素在每个support类上的相似度
