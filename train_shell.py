@@ -32,8 +32,8 @@ def parse_args():
     parser.add_argument('--loss', type=str, default='ce')
     parser.add_argument('--metric', nargs='+', default=['miou', 'dice', 'acc'])
     parser.add_argument('--ignore_index', type=int, default=255)
-    parser.add_argument('--main_metric', type=str, default='loss')
     parser.add_argument('--early_stopping_patience', type=int, default=None)
+    parser.add_argument('--main_metric', type=str, default='loss')
     
     parser.add_argument('--weight_path', type=str, default=None)
     parser.add_argument('--is_resume',  action='store_true')
@@ -52,7 +52,7 @@ def main():
     # init wandb_logger
     if args.wandb:
         from utils.wandb_utils import WandbLogger
-        wandb_logger = WandbLogger(project="CSC8639", run_name=args.save_dir, config=vars(args))
+        wandb_logger = WandbLogger(project="CSC8639_FewShot", run_name=args.save_dir, config=vars(args))
     else:
         wandb_logger = None
 
@@ -86,7 +86,7 @@ def main():
 
     # Loss & Metrics
     loss_fn = get_loss(name=args.loss, ignore_index=args.ignore_index)
-    metric_fn = get_metric(names=args.metric, per_image=False) # 可选返回每张图的指标
+    metric_fn = get_metric(names=args.metric, prefix='', per_image=False, ignore_index=args.ignore_index) # 可选返回每张图的指标
 
     # Optimizer & Scheduler
     optimizer = get_optimizer(model=model, name=args.optimizer, lr=args.learning_rate, weight_decay=args.weight_decay, use_param_groups=False) # 可选参数分组

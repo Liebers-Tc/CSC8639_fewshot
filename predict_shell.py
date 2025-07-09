@@ -18,18 +18,19 @@ def parse_args():
     parser.add_argument('--n_way', type=int, default='5')
     parser.add_argument('--k_shot', type=int, default='5')
     parser.add_argument('--q_query', type=int, default='5')
-    parser.add_argument('--episodes_per_epoch', type=int, default=1000)
+    parser.add_argument('--episodes', type=int, default=1)
 
     parser.add_argument('--model_name', type=str, required=True)
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--metric', nargs='+', default=['miou', 'dice', 'acc'])
+    parser.add_argument('--ignore_index', type=int, default=255)
 
     parser.add_argument('--weight_path', type=str, required=True)
     parser.add_argument('--use_amp', action='store_true')
     parser.add_argument('--backbone', type=str)
 
-    parser.add_argument('--save_dir', type=str, required=True)
+    parser.add_argument('--save_dir', type=str, default=None)
     parser.add_argument('--wandb', action='store_true')
 
     return parser.parse_args()
@@ -41,7 +42,7 @@ def main():
     # init wandb_logger
     if args.wandb:
         from utils.wandb_utils import WandbLogger
-        wandb_logger = WandbLogger(project="CSC8639", run_name=args.save_dir, config=vars(args))
+        wandb_logger = WandbLogger(project="CSC8639_FewShot", run_name=args.save_dir, config=vars(args))
     else:
         wandb_logger = None
 
@@ -76,25 +77,25 @@ def main():
                             upload_pred=False, upload_overlay=False, upload_group=True)
     
     # Metric
-    metric_fn = get_metric(names=args.metric, per_image=False)
+    metric_fn = get_metric(names=args.metric, prefix='', per_image=False, ignore_index=args.ignore_index)
     total_metrics = {}
 
     # Predict
     with torch.no_grad():
         for step, (support_set, query_set, selected_classes) in enumerate(test_loader):
-            support_set = [(img.to(device), mask.to(device)) for img, mask in support_set]
+            support_set = [(img.to(device), mask.to(device), cls) for img, mask, cls in support_set]
             query_imgs = torch.stack([img for img, _ in query_set]).to(device)
             query_masks = torch.stack([mask for _, mask in query_set]).to(device)
             
             with torch.autocast(device_type=device, enabled=args.use_amp):
-                outputs = model(support_set, query_set)
+                outputs = model(support_set, query_set, selected_classes)  # model.forward(support_set, query_set, selected_classes)
 
             preds = torch.argmax(outputs, dim=1)
             preds = reverse_remap(preds, selected_classes)
             start_index = step * args.batch_size
             visualizer.save_group(query_imgs, query_masks, preds, start_index=start_index)
 
-            batch_metrics = metric_fn(outputs, query_masks)
+            batch_metrics = metric_fn(outputs, query_masks, selected_classes)
             for k, v in batch_metrics.items():
                 total_metrics[k] = total_metrics.get(k, 0.0) + v.item()
         visualizer.plot_demo(query_imgs, query_masks, preds)

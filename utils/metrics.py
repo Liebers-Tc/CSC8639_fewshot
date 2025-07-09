@@ -173,10 +173,10 @@ class MetricCollection:
 
         self.metrics = metrics
 
-    def __call__(self, preds, targets, selected_classes):
+    def __call__(self, preds, targets, selected_classes, **kwargs):
         results = {}
         for name, metric in self.metrics.items():
-            out = metric(preds, targets, selected_classes)
+            out = metric(preds, targets, selected_classes, **kwargs)
             if isinstance(out, dict):
                 # 拆分每个子结果，加前缀
                 for k, v in out.items():

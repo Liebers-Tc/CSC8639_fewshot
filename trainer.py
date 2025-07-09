@@ -71,7 +71,7 @@ class Trainer:
                     outputs = self.model(support_set, query_set, selected_classes)  # model.forward(support_set, query_set, selected_classes)
                     remapped_querymask = remap_querymask(query_masks, selected_classes, ignore_index=self.ignore_index)
                     loss = self.loss_fn(outputs, remapped_querymask)
-                    metrics = self.metric_fn(outputs, remapped_querymask, selected_classes, ignore_index=self.ignore_index) if not train else {}
+                    metrics = self.metric_fn(outputs, remapped_querymask, selected_classes) if not train else {} # 只在 val 阶段生效
 
                 if train:
                     self.scaler.scale(loss).backward()
