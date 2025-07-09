@@ -14,13 +14,19 @@ from fewshot.utils.mask_mapping import reverse_remap
 
 def parse_args():
     parser = argparse.ArgumentParser(description="FewShot Segmentation Prediction")
-    # parser.add_argument('--dataset', type=str, required=True)
-    parser.add_argument('--n_way', type=int, default='5')
-    parser.add_argument('--k_shot', type=int, default='5')
-    parser.add_argument('--q_query', type=int, default='5')
-    parser.add_argument('--episodes', type=int, default=1)
+
+    parser.add_argument('--split_class_json', type=str, required=True)
+    parser.add_argument('--class2images_mapping_json', type=str, required=True)
+    parser.add_argument('--img_dir', type=str, required=True)
+    parser.add_argument('--mask_dir', type=str, required=True)
 
     parser.add_argument('--model_name', type=str, required=True)
+
+    parser.add_argument('--n_way', type=int, default=5)
+    parser.add_argument('--k_shot', type=int, default=5)
+    parser.add_argument('--q_query', type=int, default=5)
+    parser.add_argument('--episodes', type=int, default=1)
+
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--metric', nargs='+', default=['miou', 'dice', 'acc'])
@@ -28,7 +34,6 @@ def parse_args():
 
     parser.add_argument('--weight_path', type=str, required=True)
     parser.add_argument('--use_amp', action='store_true')
-    parser.add_argument('--backbone', type=str)
 
     parser.add_argument('--save_dir', type=str, default=None)
     parser.add_argument('--wandb', action='store_true')
@@ -47,18 +52,19 @@ def main():
         wandb_logger = None
 
     # Dataloader
-    # mean, std = compute_mean_std(Path("./data/fs_dataset_256/rawdata/image"))
+    # mean, std = compute_mean_std(Path(args.img_dir))
     test_loader = DataLoader(
-        EpisodeDataset(split_class_json="./data/fs_dataset_256/class_split.json", 
-                       class2images_mapping_json="./data/fs_dataset_256/class2images_mapping.json", 
-                       img_dir="./data/fs_dataset_256/rawdata/image", 
-                       mask_dir="./data/fs_dataset_256/rawdata/mask", 
-                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.episodes, phase="pred"), 
+        EpisodeDataset(split_class_json=args.split_class_json, 
+                       class2images_mapping_json=args.class2images_mapping_json, 
+                       img_dir=args.img_dir, 
+                       mask_dir=args.mask_dir, 
+                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.episodes, 
+                       phase="pred"), 
         batch_size=1, shuffle=False, num_workers=args.num_workers)
     
     # Model
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    if args.model_name == 'proto':
+    if args.model_name == 'prototype_resnet18':
         model = PrototypeNet().to(device)
     else:
         raise ValueError(f"Unsupported model: {args.model_name}")

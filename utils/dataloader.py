@@ -27,7 +27,7 @@ class EpisodeDataset(Dataset):
         self.k_shot = k_shot
         self.q_query = q_query
         self.phase = phase
-        self.episodes = episodes or (1000 if phase=="train" else 100)
+        self.episodes = episodes or (100 if phase=="train" else 10)
 
         with open(split_class_json, 'r') as f:
             self.split = json.load(f)

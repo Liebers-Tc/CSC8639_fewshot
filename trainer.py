@@ -34,7 +34,7 @@ class Trainer:
         self.device = device
         self.use_amp = use_amp
         self.wandb_logger = wandb_logger
-        self.save_dir = save_dir
+        # self.save_dir = save_dir
         self.weight_path = weight_path
         self.is_resume = is_resume
 
