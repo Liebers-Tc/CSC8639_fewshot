@@ -9,7 +9,7 @@ from utils.visualization import Visualizer
 from utils.metrics import get_metric
 from utils.savepath import find_latest_path
 from utils.compute import compute_mean_std
-from fewshot.utils.mask_mapping import reverse_remap
+from utils.mask_mapping import remap_querymask, reverse_remap
 
 
 def parse_args():
@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument('--n_way', type=int, default=5)
     parser.add_argument('--k_shot', type=int, default=5)
     parser.add_argument('--q_query', type=int, default=5)
-    parser.add_argument('--episodes', type=int, default=1)
+    parser.add_argument('--pred_episodes', type=int, default=1)
 
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--num_workers', type=int, default=8)
@@ -47,7 +47,7 @@ def main():
     # init wandb_logger
     if args.wandb:
         from utils.wandb_utils import WandbLogger
-        wandb_logger = WandbLogger(project="CSC8639_FewShot", run_name=args.save_dir, config=vars(args))
+        wandb_logger = WandbLogger(project="CSC8639_FewShot", run_name="/".join(Path(args.save_dir).parts[-2:]), config=vars(args))
     else:
         wandb_logger = None
 
@@ -58,7 +58,7 @@ def main():
                        class2images_mapping_json=args.class2images_mapping_json, 
                        img_dir=args.img_dir, 
                        mask_dir=args.mask_dir, 
-                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.episodes, 
+                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.pred_episodes, 
                        phase="pred"), 
         batch_size=1, shuffle=False, num_workers=args.num_workers)
     
@@ -95,15 +95,17 @@ def main():
             
             with torch.autocast(device_type=device, enabled=args.use_amp):
                 outputs = model(support_set, query_set, selected_classes)  # model.forward(support_set, query_set, selected_classes)
-
+            
             preds = torch.argmax(outputs, dim=1)
             preds = reverse_remap(preds, selected_classes)
+            metrics = metric_fn(preds, query_masks, selected_classes)
+            for k, v in metrics.items():
+                total_metrics[k] = total_metrics.get(k, 0.0) + v.item()
+
             start_index = step * args.batch_size
             visualizer.save_group(query_imgs, query_masks, preds, start_index=start_index)
 
-            batch_metrics = metric_fn(outputs, query_masks, selected_classes)
-            for k, v in batch_metrics.items():
-                total_metrics[k] = total_metrics.get(k, 0.0) + v.item()
+        # 只展示一组拼接图作为示例    
         visualizer.plot_demo(query_imgs, query_masks, preds)
 
     for k, v in total_metrics.items():

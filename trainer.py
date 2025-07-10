@@ -69,10 +69,17 @@ class Trainer:
 
                 with autocast(device_type=self.device, enabled=self.use_amp):
                     outputs = self.model(support_set, query_set, selected_classes)  # model.forward(support_set, query_set, selected_classes)
+                    
+                    # 将 query mask 中原始类别ID映射为对应索引值，然后进行 loss 和 metrics 计算
                     remapped_querymask = remap_querymask(query_masks, selected_classes, ignore_index=self.ignore_index)
+                    # loss 接收 outputs(logits)
                     loss = self.loss_fn(outputs, remapped_querymask)
-                    metrics = self.metric_fn(outputs, remapped_querymask, selected_classes) if not train else {} # 只在 val 阶段生效
 
+                # metrics 接收 outputs(logits)，但内部用 argmax 转换成离散值
+                # autocast 外部执行 metrics 计算
+                preds = torch.argmax(outputs, dim=1)
+                metrics = self.metric_fn(preds, remapped_querymask, list(range(len(selected_classes)))) if not train else {}  # 只在 val 阶段生效
+                    
                 if train:
                     self.scaler.scale(loss).backward()
                     self.scaler.step(self.optimizer)
@@ -100,6 +107,7 @@ class Trainer:
             # "best_score": self.best_score
             }, filepath)
         print(f"Model saved to {filepath}")
+        self.logger.log_text(f"Model saved to {filepath}\n")
 
     def load_checkpoint(self):
 
@@ -118,6 +126,8 @@ class Trainer:
             # self.train_history = checkpoint.get("train_history", {"loss": []})
             # self.val_history = checkpoint.get("val_history", {"loss": []})
             # self.best_score = checkpoint.get("best_score", self.best_score)
+            print(f"Resume Model and Hyperparameters from: {self.weight_path}")
+            self.logger.log_text(f"Resume Model and Hyperparameters from: {self.weight_path}\n")
 
         # 2. 仅加载权重，不恢复优化器
         elif self.weight_path and not self.is_resume:
@@ -125,11 +135,14 @@ class Trainer:
             self.start_epoch = 0
             self.model.load_state_dict(checkpoint["model_state_dict"])
 
-            print(f"Resume model from: {self.weight_path}")
-        
+            print(f"Only resume Model from: {self.weight_path}")
+            self.logger.log_text(f"Only resume Model from: {self.weight_path}\n")
+
         # 3. # 训练新模型
         elif self.weight_path is None:
             self.start_epoch = 0
+            print(f"Start training New Model")
+            self.logger.log_text(f"Start training New Model\n")
             return
 
     def fit(self):

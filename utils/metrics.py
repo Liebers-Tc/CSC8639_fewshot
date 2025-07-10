@@ -2,7 +2,7 @@ import torch
 
 
 class MeanIoU:
-    def __init__(self, smooth=1e-6, per_image=False):
+    def __init__(self, smooth=1e-6, per_image=False, ignore_index=None):
         """
         smooth: 平滑项，避免除零
         per_image: 是否对每张图单独计算 mIoU
@@ -10,16 +10,13 @@ class MeanIoU:
 
         self.smooth = smooth
         self.per_image = per_image
+        self.ignore_index = ignore_index
 
-    def __call__(self, preds, targets, selected_classes, ignore_index=None):
-        # 预测类别和真实类别
-        preds = torch.argmax(preds, dim=1)  # [B, H, W]
-        targets = targets.to(preds.device)
-
+    def __call__(self, preds, targets, selected_classes):
         # 对整个batch计算 miou
         ious = []
         for cls in selected_classes:
-            if cls == ignore_index:
+            if cls == self.ignore_index:
                 continue
 
             pred_cls = (preds == cls).float()
@@ -40,7 +37,7 @@ class MeanIoU:
         for b in range(preds.shape[0]):
             ious = []
             for cls in selected_classes:
-                if cls == ignore_index:
+                if cls == self.ignore_index:
                     continue
 
                 pred_cls = (preds[b] == cls).float()
@@ -61,7 +58,7 @@ class MeanIoU:
 
 
 class DiceScore:
-    def __init__(self, smooth=1e-6, per_image=False):
+    def __init__(self, smooth=1e-6, per_image=False, ignore_index=None):
         """
         smooth: 平滑项，避免除零
         per_image: 是否对每张图单独计算 mdice
@@ -69,15 +66,13 @@ class DiceScore:
 
         self.smooth = smooth
         self.per_image = per_image
+        self.ignore_index = ignore_index
 
-    def __call__(self, preds, targets, selected_classes, ignore_index=None):
-        preds = torch.argmax(preds, dim=1)  # [B, H, W]
-        targets = targets.to(preds.device)
-
+    def __call__(self, preds, targets, selected_classes):
         # 对整个 batch 计算 mdice
         dices = []
         for cls in selected_classes:
-            if cls == ignore_index:
+            if cls == self.ignore_index:
                 continue
 
             pred_cls = (preds == cls).float()
@@ -98,7 +93,7 @@ class DiceScore:
         for b in range(preds.shape[0]):
             dices = []
             for cls in selected_classes:
-                if cls == ignore_index:
+                if cls == self.ignore_index:
                     continue
 
                 pred_cls = (preds[b] == cls).float()
@@ -119,21 +114,19 @@ class DiceScore:
     
 
 class PixelAccuracy:
-    def __init__(self, per_image=False):
+    def __init__(self, per_image=False, ignore_index=None):
         """
         per_image: 是否对每张图单独计算 Accuracy
         """
 
         self.per_image = per_image
+        self.ignore_index = ignore_index
 
-    def __call__(self, preds, targets, selected_classes, ignore_index=None):
-        preds = torch.argmax(preds, dim=1)  # [B, H, W]
-        targets = targets.to(preds.device)
-
+    def __call__(self, preds, targets, selected_classes):
         # 整个 batch 计算 Accuracy
         mask = torch.zeros_like(targets, dtype=torch.bool)  # 初始化全False
         for cls in selected_classes:
-            if cls == ignore_index:
+            if cls == self.ignore_index:
                 continue
             mask |= (targets == cls)
 
@@ -149,7 +142,7 @@ class PixelAccuracy:
         for b in range(preds.shape[0]):
             mask_b = torch.zeros_like(targets[b], dtype=torch.bool)
             for cls in selected_classes:
-                if cls == ignore_index:
+                if cls == self.ignore_index:
                     continue
                 mask_b |= (targets[b] == cls)
 
@@ -189,7 +182,7 @@ class MetricCollection:
         return list(self.metrics.keys())
 
 
-def get_metric(names=['miou', 'dice', 'acc'], prefix='', per_image=False, **kwargs):
+def get_metric(names=['miou', 'dice', 'acc'], prefix='', per_image=False, ignore_index=None, **kwargs):
     """
     names: 要使用的指标名称列表
     prefix: 每个 metric 名字前缀（如 'val' → 'val/miou'）
@@ -201,9 +194,9 @@ def get_metric(names=['miou', 'dice', 'acc'], prefix='', per_image=False, **kwar
         names = [names]
 
     available = {
-        'miou': MeanIoU(per_image=per_image, **kwargs),
-        'dice': DiceScore(per_image=per_image, **kwargs),
-        'acc': PixelAccuracy(per_image=per_image)
+        'miou': MeanIoU(per_image=per_image, ignore_index=ignore_index, **kwargs),
+        'dice': DiceScore(per_image=per_image, ignore_index=ignore_index, **kwargs),
+        'acc': PixelAccuracy(per_image=per_image, ignore_index=ignore_index)
     }
 
     selected = {}

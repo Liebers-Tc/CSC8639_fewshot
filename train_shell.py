@@ -25,7 +25,8 @@ def parse_args():
     parser.add_argument('--n_way', type=int, default=5)
     parser.add_argument('--k_shot', type=int, default=5)
     parser.add_argument('--q_query', type=int, default=5)
-    parser.add_argument('--episodes', type=int, default=100)
+    parser.add_argument('--train_episodes', type=int, default=100)
+    parser.add_argument('--val_episodes', type=int, default=10)
 
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--num_workers', type=int, default=8)
@@ -37,7 +38,7 @@ def parse_args():
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--loss', type=str, default='ce')
     parser.add_argument('--metric', nargs='+', default=['miou', 'dice', 'acc'])
-    parser.add_argument('--ignore_index', type=int, default=255)
+    parser.add_argument('--ignore_index', type=int, default=255)  # background pixel value
     parser.add_argument('--early_stopping_patience', type=int, default=None)
     parser.add_argument('--main_metric', type=str, default='loss')
     
@@ -57,7 +58,7 @@ def main():
     # init wandb_logger
     if args.wandb:
         from utils.wandb_utils import WandbLogger
-        wandb_logger = WandbLogger(project="CSC8639_FewShot", run_name=args.save_dir, config=vars(args))
+        wandb_logger = WandbLogger(project="CSC8639_FewShot", run_name=Path(args.save_dir).name, config=vars(args))
     else:
         wandb_logger = None
 
@@ -71,7 +72,7 @@ def main():
                        class2images_mapping_json=args.class2images_mapping_json, 
                        img_dir=args.img_dir, 
                        mask_dir=args.mask_dir, 
-                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.episodes, 
+                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.train_episodes, 
                        phase="train"), 
         batch_size=1, shuffle=True, num_workers=args.num_workers)
     
@@ -80,7 +81,7 @@ def main():
                        class2images_mapping_json=args.class2images_mapping_json, 
                        img_dir=args.img_dir, 
                        mask_dir=args.mask_dir, 
-                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.episodes, 
+                       n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.val_episodes, 
                        phase="val"), 
         batch_size=1, shuffle=False, num_workers=args.num_workers)
 
@@ -128,11 +129,7 @@ def main():
     # Start Training
     trainer.load_checkpoint()
 
-    msg_config = f"[CONFIG] n_way={args.n_way}, k_shot={args.k_shot}, q_query={args.q_query}, episodes={args.episodes}, ignore_index={args.ignore_index}"
-    if args.is_resume:
-        msg = f"Resume training from {args.weight_path}\n{msg_config}"
-    else:
-        msg = f"Start new training\n{msg_config}"
+    msg = f"[CONFIG] n_way={args.n_way}, k_shot={args.k_shot}, q_query={args.q_query}, episodes={args.episodes}, ignore_index={args.ignore_index}\n\n"
     print(msg)
     trainer.logger.log_text(msg)
 

@@ -2,11 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import resnet18
-from collections import defaultdict
 
 
 class PrototypeNet(nn.Module):
-    def __init__(self, in_channels=3, backbone="resnet18", pretrained=True):
+    def __init__(self, in_channels=3, backbone="resnet18", pretrained=True):  # 预留 in_channels 和 backbone，虽然没想好要干吗用
         super().__init__()
 
         # 加载预训练模型作为 encoder
