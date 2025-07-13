@@ -39,14 +39,14 @@ class EpisodeDataset(Dataset):
 
         # 图像预处理：转为 Tensor 并标准化
         self.image_transform = T.Compose([
-            # T.Resize((256, 256), interpolation=Image.BILINEAR),
+            T.Resize((256, 256), interpolation=Image.BILINEAR),
             T.ToTensor(),
             T.Normalize(mean, std)
             ])
         
         # 掩码预处理：读取为 Long 类型张量（不做归一化或缩放）
         self.mask_transform = T.Compose([
-            # T.Resize((256, 256), interpolation=Image.NEAREST),
+            T.Resize((256, 256), interpolation=Image.NEAREST),
             T.Lambda(self._mask_to_tensor)
             ])
 
@@ -81,10 +81,10 @@ class EpisodeDataset(Dataset):
                 img_path = self.img_dir / f"{img_id}.jpg"
                 mask_path = self.mask_dir / f"{img_id}.png"
 
-                image = Image.open(img_path).convert("RGB")
+                img = Image.open(img_path).convert("RGB")
                 mask = Image.open(mask_path)  # query不进行二值化，保留原生类别ID
 
-                query_img = self.image_transform(image)
+                query_img = self.image_transform(img)
                 query_mask = self.mask_transform(mask)
                 
                 query_set.append((query_img, query_mask))

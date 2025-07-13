@@ -5,19 +5,41 @@ from torchvision.models import resnet18
 
 
 class PrototypeNet(nn.Module):
-    def __init__(self, in_channels=3, backbone="resnet18", pretrained=True):  # 预留 in_channels 和 backbone，虽然没想好要干吗用
+    def __init__(self, n_way, backbone="resnet18", pretrained=True):  # 预留 backbone 做接口
         super().__init__()
 
         # 加载预训练模型作为 encoder
         resnet = resnet18(pretrained=pretrained)
         self.encoder = nn.Sequential(
             resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool,
-            resnet.layer1, resnet.layer2, resnet.layer3
-        )
+            resnet.layer1, 
+            resnet.layer2, 
+            resnet.layer3
+            )
         self.out_channels = 256  # encoder输出通道
 
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(n_way, 64, 2, stride=2),   # 16→32
+            nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+
+            nn.ConvTranspose2d(64, 32, 2, stride=2),      # 32→64
+            nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+
+            nn.ConvTranspose2d(32, 16, 2, stride=2),      # 64→128
+            nn.BatchNorm2d(16), nn.ReLU(inplace=True),
+
+            nn.ConvTranspose2d(16, n_way, 2, stride=2),   # 128→256
+            )
+        
+    # L2‑normalize feature maps along channel dim for cosine sim
+    @staticmethod
+    def _normalize(feats):
+        return F.normalize(feats, p=2, dim=1, eps=1e-7)
+
     def extract_features(self, images):
-        return self.encoder(images)  # [B, 3, H, W] -> [B, C, h, w]
+        feats = self.encoder(images)  # [B, 3, H, W] -> [B, C, h, w]
+        feats = self._normalize(feats)
+        return feats
     
     def forward(self, support_set, query_set, selected_classes):
         """
@@ -26,47 +48,49 @@ class PrototypeNet(nn.Module):
         selected_classes: List[int]，当前 episode 中 support set 的类别ID
         """
         device = self.encoder[0].weight.device
-        n_way = len(selected_classes)
 
-        # initial & extract features
-        support_imgs = torch.stack([img for img, _, _ in support_set], dim=0).to(device)  # [S, 3, H, W]
-        support_feats = self.extract_features(support_imgs)  # [S, C, h, w]
+        # stack support/query
+        support_imgs = torch.stack([img for img, _, _ in support_set])  # (S,3,256,256)
+        support_masks = torch.stack([mask for _, mask, _ in support_set])  # (S,256,256)
+        query_imgs   = torch.stack([img for img, _ in query_set])          # (Q,3,256,256)
+
+        # extract features
+        support_feats = self.extract_features(support_imgs)  # (S,256,16,16)
+        query_feats   = self.extract_features(query_imgs)    # (Q,256,16,16)
 
         # build prototype
-        proto_dict = {cls_id: [] for cls_id in selected_classes}
-        for i, (img, binary_mask, cls_id) in enumerate(support_set):
-            feat = support_feats[i]  # [C, h, w]
-            mask = binary_mask.float().unsqueeze(0).unsqueeze(0).to(device)  # [1, 1, H, W]
-            mask = F.interpolate(mask, size=feat.shape[1:], mode='nearest').squeeze()  # [h, w]
-
-            feat_flat = feat.view(self.out_channels, -1)  # [C, h*w]
-            mask_flat = mask.view(-1)  # [h*w]
-            if mask_flat.sum() == 0:
-                continue
-
-            selected_feat = feat_flat[:, mask_flat > 0]  # [C, N]
-            proto = selected_feat.mean(dim=1)            # [C]
-            proto_dict[cls_id].append(proto)
-
-        # initial / update prototype for each class (mean & normalize)
         prototypes = []
-        for cls_id in selected_classes:
-            vecs = proto_dict[cls_id]
-            if len(vecs) == 0:
-                prototypes.append(torch.zeros(1, self.out_channels, device=device))
+        for cls in selected_classes:
+            # 下采样至 (S,16,16)
+            cls_mask = (support_masks == cls).float().unsqueeze(1)
+            cls_mask = F.interpolate(cls_mask, size=support_feats.shape[-2:], mode='nearest').squeeze(1)
+
+            # ➜ 每张图该类的像素个数   (S,)
+            area_per_img = cls_mask.sum((1, 2))
+
+            # ➜ 有效图片布尔索引
+            valid_mask   = area_per_img > 0               # (S,)
+
+            if valid_mask.any():                          # 至少 1 张包含该类
+                # (1) 先对每张图求 masked mean          (S,C)
+                safe_area = area_per_img.clone()
+                safe_area[safe_area == 0] = 1             # 防止除 0，但不会被选进平均
+                per_img_proto = (support_feats * cls_mask.unsqueeze(1))\
+                                .sum((2,3)) / safe_area.unsqueeze(1)
+
+                # (2) 对有效图片做简单平均  (C)
+                proto = per_img_proto[valid_mask].mean(0)
             else:
-                proto = torch.stack(vecs).mean(dim=0, keepdim=True)
-                proto = F.normalize(proto, dim=1)
-                prototypes.append(proto)
+                # 若所有图都缺失该类，用 0 向量占位
+                proto = torch.zeros(support_feats.size(1), device=support_feats.device)
 
-        prototypes = torch.cat(prototypes, dim=0)  # [n_way, C]
+            prototypes.append(proto)
 
-        # query inference
-        query_imgs = torch.stack([img for img, _ in query_set], dim=0).to(device)  # [B, 3, H, W]
-        query_feats = self.extract_features(query_imgs)  # [B, C, h, w]
-        query_feats = F.normalize(query_feats, dim=1)    # 归一化后用于余弦相似度
+        prototypes = torch.stack(prototypes)              # (n_way, C)
+        prototypes = self._normalize(prototypes)
 
         # similarity (cos)
         sims = torch.einsum('bchw,nc->bnhw', query_feats, prototypes)  # [B, N_way, h, w]
+        logits = self.decoder(sims)
 
-        return sims  # logits, 每个像素在每个support类上的相似度
+        return logits  # logits, 按 sim 解码成原尺寸图像

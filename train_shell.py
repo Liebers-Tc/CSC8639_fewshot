@@ -52,6 +52,11 @@ def parse_args():
     return parser.parse_args()
 
 
+def episodic_collate(batch):
+    # 目前只对 batch size = 1 时有效
+    # 解决 dataloader 对齐批次时添加 batch dim 的问题
+    return batch[0]
+
 def main():
     args = parse_args()
 
@@ -74,7 +79,7 @@ def main():
                        mask_dir=args.mask_dir, 
                        n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.train_episodes, 
                        phase="train"), 
-        batch_size=1, shuffle=True, num_workers=args.num_workers)
+        batch_size=1, shuffle=True, num_workers=args.num_workers, collate_fn=episodic_collate)
     
     val_loader = DataLoader(
         EpisodeDataset(split_class_json=args.split_class_json, 
@@ -83,12 +88,13 @@ def main():
                        mask_dir=args.mask_dir, 
                        n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.val_episodes, 
                        phase="val"), 
-        batch_size=1, shuffle=False, num_workers=args.num_workers)
+        batch_size=1, shuffle=False, num_workers=args.num_workers, collate_fn=episodic_collate)
 
     # Model
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda'
     if args.model_name == 'prototype_resnet18':
-        model = PrototypeNet().to(device)
+        model = PrototypeNet(n_way=args.n_way).to(device)
     else:
         raise ValueError(f"Unsupported model: {args.model_name}")
 
@@ -129,7 +135,7 @@ def main():
     # Start Training
     trainer.load_checkpoint()
 
-    msg = f"[CONFIG] n_way={args.n_way}, k_shot={args.k_shot}, q_query={args.q_query}, episodes={args.episodes}, ignore_index={args.ignore_index}\n\n"
+    msg = f"[CONFIG] n_way={args.n_way}, k_shot={args.k_shot}, q_query={args.q_query}, train_episodes={args.train_episodes}, val_episodes={args.val_episodes}, ignore_index={args.ignore_index}\n\n"
     print(msg)
     trainer.logger.log_text(msg)
 

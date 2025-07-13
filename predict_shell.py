@@ -41,6 +41,11 @@ def parse_args():
     return parser.parse_args()
 
 
+def episodic_collate(batch):
+    # 目前只对 batch size = 1 时有效
+    # 解决 dataloader 对齐批次时添加 batch dim 的问题
+    return batch[0]
+
 def main():
     args = parse_args()
 
@@ -59,13 +64,13 @@ def main():
                        img_dir=args.img_dir, 
                        mask_dir=args.mask_dir, 
                        n_way=args.n_way, k_shot=args.k_shot, q_query=args.q_query, episodes=args.pred_episodes, 
-                       phase="pred"), 
-        batch_size=1, shuffle=False, num_workers=args.num_workers)
+                       phase="test"), 
+        batch_size=1, shuffle=False, num_workers=args.num_workers, collate_fn=episodic_collate)
     
     # Model
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if args.model_name == 'prototype_resnet18':
-        model = PrototypeNet().to(device)
+        model = PrototypeNet(n_way=args.n_way).to(device)
     else:
         raise ValueError(f"Unsupported model: {args.model_name}")
 
@@ -90,8 +95,9 @@ def main():
     with torch.no_grad():
         for step, (support_set, query_set, selected_classes) in enumerate(test_loader):
             support_set = [(img.to(device), mask.to(device), cls) for img, mask, cls in support_set]
-            query_imgs = torch.stack([img for img, _ in query_set]).to(device)
-            query_masks = torch.stack([mask for _, mask in query_set]).to(device)
+            query_set = [(img.to(device), mask.to(device)) for img, mask in query_set]
+            query_imgs = torch.stack([img for img, _ in query_set])
+            query_masks = torch.stack([mask for _, mask in query_set])
             
             with torch.autocast(device_type=device, enabled=args.use_amp):
                 outputs = model(support_set, query_set, selected_classes)  # model.forward(support_set, query_set, selected_classes)

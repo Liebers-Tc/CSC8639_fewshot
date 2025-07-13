@@ -65,7 +65,8 @@ class Trainer:
                 self.optimizer.zero_grad()
                 
                 support_set = [(img.to(self.device), mask.to(self.device), cls) for img, mask, cls in support_set]
-                query_masks = torch.stack([mask for _, mask in query_set]).to(self.device)
+                query_set = [(img.to(self.device), mask.to(self.device)) for img, mask in query_set]
+                query_masks = torch.stack([mask for _, mask in query_set])
 
                 with autocast(device_type=self.device, enabled=self.use_amp):
                     outputs = self.model(support_set, query_set, selected_classes)  # model.forward(support_set, query_set, selected_classes)
