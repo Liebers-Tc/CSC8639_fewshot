@@ -3,6 +3,10 @@ import torch
 from torch.utils.data import DataLoader
 from pathlib import Path
 from model.prototype_model import PrototypeNet
+from model.prototype_resnet18_fix import PrototypeNet
+from model.fewshot_unet import FewShotUNet
+from model.prototype_resnet50 import ProtoSegNet
+from model.prototype_resnet50_bg import ProtoResNet50BG
 from utils.dataloader import EpisodeDataset
 from utils.loss import get_loss
 from utils.metrics import get_metric
@@ -20,7 +24,7 @@ def parse_args():
     parser.add_argument('--img_dir', type=str, required=True)
     parser.add_argument('--mask_dir', type=str, required=True)
     
-    parser.add_argument('--model_name', type=str, default='prototype_resnet18')
+    parser.add_argument('--model_name', type=str, default='')
 
     parser.add_argument('--n_way', type=int, default=5)
     parser.add_argument('--k_shot', type=int, default=5)
@@ -38,7 +42,7 @@ def parse_args():
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--loss', type=str, default='ce')
     parser.add_argument('--metric', nargs='+', default=['miou', 'dice', 'acc'])
-    parser.add_argument('--ignore_index', type=int, default=255)  # background pixel value
+    parser.add_argument('--ignore_index', type=int, default=None)  # background pixel value
     parser.add_argument('--early_stopping_patience', type=int, default=None)
     parser.add_argument('--main_metric', type=str, default='loss')
     
@@ -95,6 +99,14 @@ def main():
     device = 'cuda'
     if args.model_name == 'prototype_resnet18':
         model = PrototypeNet(n_way=args.n_way).to(device)
+    elif args.model_name == 'fewshot_unet':
+        model = FewShotUNet(n_way=args.n_way).to(device)
+    elif args.model_name == 'prototype_resnet18_fix':
+        model = ProtoSegNet(n_way=args.n_way).to(device)
+    elif args.model_name == 'prototype_resnet50':
+        model = ProtoSegNet(n_way=args.n_way).to(device)
+    elif args.model_name == 'prototype_resnet50_bg':
+        model = ProtoResNet50BG(n_way=args.n_way).to(device)
     else:
         raise ValueError(f"Unsupported model: {args.model_name}")
 
@@ -135,7 +147,7 @@ def main():
     # Start Training
     trainer.load_checkpoint()
 
-    msg = f"[CONFIG] n_way={args.n_way}, k_shot={args.k_shot}, q_query={args.q_query}, train_episodes={args.train_episodes}, val_episodes={args.val_episodes}, ignore_index={args.ignore_index}\n\n"
+    msg = f"[CONFIG] n_way={args.n_way}, k_shot={args.k_shot}, q_query={args.q_query}, train_episodes={args.train_episodes}, val_episodes={args.val_episodes}\n\n"
     print(msg)
     trainer.logger.log_text(msg)
 

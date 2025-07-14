@@ -89,6 +89,22 @@ class PrototypeNet(nn.Module):
         prototypes = torch.stack(prototypes)              # (n_way, C)
         prototypes = self._normalize(prototypes)
 
+        # prototypes = []
+        # for cls in selected_classes:
+        #     cls_mask = (support_masks == cls).float().unsqueeze(1)
+        #     cls_mask = F.interpolate(cls_mask, size=support_feats.shape[-2:], mode='nearest')
+        #     cls_mask = cls_mask.squeeze(1)                         # (S,16,16)
+
+        #     # 先对每张图求 masked mean
+        #     masked_feats = support_feats * cls_mask.unsqueeze(1)   # (S,C,16,16)
+        #     per_img_proto = masked_feats.sum((2,3)) / (cls_mask.sum((1,2)) + 1e-5)  # (S,C)
+
+        #     proto = per_img_proto.mean(0)                          # 再对 S 取平均
+        #     prototypes.append(proto)
+
+        # prototypes = torch.stack(prototypes)
+        # prototypes = self._normalize(prototypes)
+
         # similarity (cos)
         sims = torch.einsum('bchw,nc->bnhw', query_feats, prototypes)  # [B, N_way, h, w]
         logits = self.decoder(sims)

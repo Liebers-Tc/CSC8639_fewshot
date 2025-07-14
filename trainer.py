@@ -72,14 +72,14 @@ class Trainer:
                     outputs = self.model(support_set, query_set, selected_classes)  # model.forward(support_set, query_set, selected_classes)
                     
                     # 将 query mask 中原始类别ID映射为对应索引值，然后进行 loss 和 metrics 计算
-                    remapped_querymask = remap_querymask(query_masks, selected_classes, ignore_index=self.ignore_index)
+                    remapped_querymask = remap_querymask(query_masks, selected_classes, n_way=len(selected_classes))
                     # loss 接收 outputs(logits)
                     loss = self.loss_fn(outputs, remapped_querymask)
 
                 # metrics 接收 outputs(logits)，但内部用 argmax 转换成离散值
                 # autocast 外部执行 metrics 计算
                 preds = torch.argmax(outputs, dim=1)
-                metrics = self.metric_fn(preds, remapped_querymask, list(range(len(selected_classes)))) if not train else {}  # 只在 val 阶段生效
+                metrics = self.metric_fn(preds, remapped_querymask, list(range(len(selected_classes)+1))) if not train else {}  # 只在 val 阶段生效
                     
                 if train:
                     self.scaler.scale(loss).backward()

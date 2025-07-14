@@ -4,6 +4,10 @@ import torch
 from torch.utils.data import DataLoader
 from pathlib import Path
 from model.prototype_model import PrototypeNet
+from model.prototype_resnet18_fix import PrototypeNet
+from model.fewshot_unet import FewShotUNet
+from model.prototype_resnet50 import ProtoSegNet
+from model.prototype_resnet50_bg import ProtoResNet50BG
 from utils.dataloader import EpisodeDataset
 from utils.visualization import Visualizer
 from utils.metrics import get_metric
@@ -30,7 +34,7 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--metric', nargs='+', default=['miou', 'dice', 'acc'])
-    parser.add_argument('--ignore_index', type=int, default=255)
+    parser.add_argument('--ignore_index', type=int, default=None)
 
     parser.add_argument('--weight_path', type=str, required=True)
     parser.add_argument('--use_amp', action='store_true')
@@ -68,9 +72,17 @@ def main():
         batch_size=1, shuffle=False, num_workers=args.num_workers, collate_fn=episodic_collate)
     
     # Model
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda'
     if args.model_name == 'prototype_resnet18':
         model = PrototypeNet(n_way=args.n_way).to(device)
+    elif args.model_name == 'fewshot_unet':
+        model = FewShotUNet(n_way=args.n_way).to(device)
+    elif args.model_name == 'prototype_resnet18_fix':
+        model = ProtoSegNet(n_way=args.n_way).to(device)
+    elif args.model_name == 'prototype_resnet50':
+        model = ProtoSegNet(n_way=args.n_way).to(device)
+    elif args.model_name == 'prototype_resnet50_bg':
+        model = ProtoResNet50BG(n_way=args.n_way).to(device)
     else:
         raise ValueError(f"Unsupported model: {args.model_name}")
 
@@ -101,10 +113,13 @@ def main():
             
             with torch.autocast(device_type=device, enabled=args.use_amp):
                 outputs = model(support_set, query_set, selected_classes)  # model.forward(support_set, query_set, selected_classes)
+                remapped_querymask = remap_querymask(query_masks, selected_classes, n_way=len(selected_classes))
             
             preds = torch.argmax(outputs, dim=1)
-            preds = reverse_remap(preds, selected_classes)
-            metrics = metric_fn(preds, query_masks, selected_classes)
+            # preds = reverse_remap(preds, selected_classes)
+            # metrics = metric_fn(preds, query_masks, selected_classes)
+            metrics = metric_fn(preds, remapped_querymask, list(range(len(selected_classes)+1)))
+
             for k, v in metrics.items():
                 total_metrics[k] = total_metrics.get(k, 0.0) + v.item()
 

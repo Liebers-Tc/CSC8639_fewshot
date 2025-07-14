@@ -27,7 +27,7 @@ class EpisodeDataset(Dataset):
         self.k_shot = k_shot
         self.q_query = q_query
         self.phase = phase
-        self.episodes = episodes or (100 if phase=="train" else 10)
+        self.episodes = episodes
 
         with open(split_class_json, 'r') as f:
             self.split = json.load(f)
@@ -69,8 +69,8 @@ class EpisodeDataset(Dataset):
 
                 img = Image.open(img_path).convert("RGB")
                 mask = Image.open(mask_path)
-                binary_mask = (np.array(mask) == int(cls)).astype(np.uint8) # 转化成二值mask
-                mask = Image.fromarray(binary_mask)
+                # binary_mask = (np.array(mask) == int(cls)).astype(np.uint8) # 转化成二值mask
+                # mask = Image.fromarray(binary_mask)
 
                 support_img = self.image_transform(img)
                 support_mask = self.mask_transform(mask)
