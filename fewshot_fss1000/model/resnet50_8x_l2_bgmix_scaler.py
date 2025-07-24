@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import resnet50, ResNet50_Weights
-from collections import defaultdict
 
 
 # encoder
@@ -71,7 +70,7 @@ def compute_bg_prototypes(feats, masks, labels, classes, merge_all=True):
     max_pix: 最大选取像素数量
     """
     H, W = feats.shape[2:]
-    bg_prototypes_per_class = defaultdict(list)
+    bg_prototypes_per_class = {}
     for cls_id in classes:
         idx = (labels == cls_id).nonzero(as_tuple=True)[0]
         f = feats[idx]
@@ -82,7 +81,7 @@ def compute_bg_prototypes(feats, masks, labels, classes, merge_all=True):
         if m.sum() < 1: continue
         area = m.sum((1,2))
         per = (f * m.unsqueeze(1)).sum((2,3)) / (area.unsqueeze(1) + 1e-7)
-        bg_prototypes_per_class[cls_id].append(per.mean(0))  # 每类平均（后续可以修改为每张图先建立一个原型，按图处理）
+        bg_prototypes_per_class[cls_id] = per.mean(0)  # 每类平均（后续可以修改为每张图先建立一个原型，按图处理）
 
     if merge_all:
         bg_prototype = torch.stack(list(bg_prototypes_per_class.values())).mean(0, keepdim=True)
