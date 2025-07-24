@@ -68,7 +68,7 @@ def main():
     # init wandb_logger
     if args.wandb:
         from utils.wandb_utils import WandbLogger
-        wandb_logger = WandbLogger(project="CSC8639_FewShot", run_name=Path(args.save_dir).name, config=vars(args))
+        wandb_logger = WandbLogger(project="CSC8639_FewShot_FoodSeg103", run_name=Path(args.save_dir).name, config=vars(args))
     else:
         wandb_logger = None
 
