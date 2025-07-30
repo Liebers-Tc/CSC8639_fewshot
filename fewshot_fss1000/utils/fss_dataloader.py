@@ -74,7 +74,7 @@ class EpisodeDataset(Dataset):
                 mask_path = path / f"{name}.png"
 
                 img = Image.open(img_path).convert("RGB")
-                mask = Image.open(mask_path).split()[-1]  # RGBA 取A
+                mask = Image.open(mask_path).convert("L")
 
                 support_img = self.image_transform(img)
                 support_mask = self.mask_transform(mask)
@@ -86,7 +86,7 @@ class EpisodeDataset(Dataset):
                 mask_path = path / f"{name}.png"
 
                 img = Image.open(img_path).convert("RGB")
-                mask = Image.open(mask_path).split()[-1]
+                mask = Image.open(mask_path).convert("L")
 
                 query_img = self.image_transform(img)
                 query_mask = self.mask_transform(mask)
